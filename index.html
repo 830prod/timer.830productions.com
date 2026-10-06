@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>830 Time</title>
+<meta name="description" content="Fullscreen seven-segment live clock for streaming and recording.">
+<meta name="theme-color" content="#000000">
+<style>
+  :root {
+    --on: #ff2a1a;
+    --glow: rgba(255, 42, 26, .55);
+    --ghost: .075;
+    --bg: #000;
+    --ui-bg: rgba(18, 18, 18, .92);
+    --ui-line: rgba(255, 255, 255, .12);
+    --ui-text: #d8d8d8;
+    --ui-dim: #8a8a8a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ui-text);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  body.transparent { --bg: transparent; }
+  body.noghost { --ghost: 0; }
+  body.idle, body.idle * { cursor: none !important; }
+
+  /* ---------- Display ---------- */
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 4vmin;
+  }
+  .clock { position: relative; width: 100%; max-width: 94vw; }
+  svg.digits { display: block; width: 100%; height: auto; max-height: 80vh; overflow: visible; filter: drop-shadow(0 0 .5vmin var(--glow)); }
+  .seg { fill: var(--on); opacity: var(--ghost); }
+  .seg.on { opacity: 1; }
+
+  #ampm {
+    position: absolute; right: 0; bottom: -1.2em;
+    display: flex; gap: .9em;
+    font: 700 clamp(12px, 2.4vmin, 28px)/1 ui-monospace, Menlo, monospace; letter-spacing: .14em;
+  }
+  #ampm[hidden] { display: none; }
+  #ampm span { color: var(--on); opacity: var(--ghost); }
+  #ampm span.on { opacity: 1; text-shadow: 0 0 .6vmin var(--glow); }
+
+  /* ---------- Controls ---------- */
+  #bar {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px;
+    max-width: calc(100vw - 32px);
+    padding: 8px; border-radius: 14px; background: var(--ui-bg); border: 1px solid var(--ui-line);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    transition: opacity .35s, transform .35s;
+  }
+  body.idle #bar, body.idle #panel, body.noui #bar, body.noui #panel { opacity: 0; pointer-events: none; }
+  body.idle #bar, body.noui #bar { transform: translateX(-50%) translateY(10px); }
+
+  button {
+    font: inherit; color: var(--ui-text); background: rgba(255,255,255,.06);
+    border: 1px solid var(--ui-line); border-radius: 9px; height: 36px; padding: 0 12px;
+    cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: rgba(255,255,255,.12); }
+  button:focus-visible { outline: 2px solid var(--on); outline-offset: 1px; }
+  .seg-group { display: inline-flex; border: 1px solid var(--ui-line); border-radius: 9px; overflow: hidden; }
+  .seg-group button { border: 0; border-radius: 0; background: transparent; }
+  .seg-group button[aria-pressed="true"] { background: rgba(255,255,255,.16); color: #fff; }
+  .icon { width: 36px; padding: 0; display: inline-grid; place-items: center; }
+  .icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  #panel {
+    position: fixed; right: 16px; bottom: 80px; width: min(340px, calc(100vw - 32px));
+    max-height: calc(100vh - 110px); overflow: auto;
+    padding: 16px; border-radius: 14px; background: var(--ui-bg); border: 1px solid var(--ui-line);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    transition: opacity .35s;
+  }
+  #panel[hidden] { display: none; }
+  #panel h3 { margin: 16px 0 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--ui-dim); font-weight: 600; }
+  #panel h3:first-child { margin-top: 0; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; }
+  .row label { cursor: pointer; }
+  .row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--on); cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { height: 30px; padding: 0 10px; font-size: 13px; }
+  .swatch { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+  .swatch[aria-pressed="true"] { border-color: #fff; }
+  kbd { font: 12px ui-monospace, Menlo, monospace; padding: 1px 6px; border: 1px solid var(--ui-line); border-radius: 5px; background: rgba(255,255,255,.06); }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; color: var(--ui-dim); }
+  .note { font-size: 12px; color: var(--ui-dim); margin: 6px 0 0; }
+
+  #toast {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    padding: 8px 14px; border-radius: 9px; background: var(--ui-bg); border: 1px solid var(--ui-line);
+    font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  @media (max-width: 640px) {
+    #bar { bottom: 10px; gap: 6px; }
+    #panel { bottom: auto; top: 16px; max-height: calc(100vh - 100px); }
+  }
+</style>
+</head>
+<body>
+
+<main id="stage">
+  <div class="clock">
+    <svg id="main" class="digits" role="timer" aria-label="Current time"></svg>
+    <div id="ampm" hidden aria-hidden="true"><span data-p="AM">AM</span><span data-p="PM">PM</span></div>
+  </div>
+</main>
+
+<div id="bar">
+  <div class="seg-group" role="group" aria-label="Hour format">
+    <button data-fmt="24" title="24-hour (T)">24-hour</button>
+    <button data-fmt="12" title="12-hour (T)">12-hour</button>
+  </div>
+  <button id="settingsBtn" class="icon" title="Settings (S)" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+  <button id="fsBtn" class="icon" title="Fullscreen (F or double-click)" aria-label="Fullscreen">
+    <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+  </button>
+</div>
+
+<aside id="panel" hidden>
+  <h3>Colour</h3>
+  <div class="chips" id="colors"></div>
+
+  <h3>Display</h3>
+  <div class="row"><label for="optGhost">Show unlit segments</label><input type="checkbox" id="optGhost"></div>
+  <div class="row"><label for="optTransparent">Transparent background (OBS)</label><input type="checkbox" id="optTransparent"></div>
+  <div class="row"><label for="optWake">Keep screen awake</label><input type="checkbox" id="optWake"></div>
+
+  <h3>OBS browser source</h3>
+  <div class="chips"><button id="obsBtn">Copy OBS link</button></div>
+  <p class="note">Uses your current colour and format, with a transparent background and the controls hidden.</p>
+
+  <h3>Keyboard</h3>
+  <div class="keys">
+    <kbd>F</kbd><span>Fullscreen (or double-click)</span>
+    <kbd>T</kbd><span>12 / 24-hour</span>
+    <kbd>H</kbd><span>Hide controls</span>
+    <kbd>S</kbd><span>Settings</span>
+  </div>
+</aside>
+
+<div id="toast" role="status"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Seven-segment renderer ----------
+  const NS = 'http://www.w3.org/2000/svg';
+  const DW = 60, DH = 100, T = 11, G = 1.6, GAP = 14, COLON_W = 22;
+  const SEGMAP = { '0':'abcdef','1':'bc','2':'abged','3':'abgcd','4':'fgbc','5':'afgcd','6':'afgedc','7':'abc','8':'abcdefg','9':'abcdfg' };
+
+  const hseg = (x1, x2, y) => { const h = T / 2;
+    return `${x1},${y} ${x1+h},${y-h} ${x2-h},${y-h} ${x2},${y} ${x2-h},${y+h} ${x1+h},${y+h}`; };
+  const vseg = (x, y1, y2) => { const h = T / 2;
+    return `${x},${y1} ${x+h},${y1+h} ${x+h},${y2-h} ${x},${y2} ${x-h},${y2-h} ${x-h},${y1+h}`; };
+
+  const L = T / 2 + 1, R = DW - T / 2 - 1, TOP = T / 2 + 1, MID = DH / 2, BOT = DH - T / 2 - 1;
+  const SEGPTS = {
+    a: hseg(L + G, R - G, TOP), g: hseg(L + G, R - G, MID), d: hseg(L + G, R - G, BOT),
+    f: vseg(L, TOP + G, MID - G), b: vseg(R, TOP + G, MID - G),
+    e: vseg(L, MID + G, BOT - G), c: vseg(R, MID + G, BOT - G),
+  };
+
+  function el(tag, attrs, parent) {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    parent.appendChild(n);
+    return n;
+  }
+
+  // Build a fixed 88:88:88 display once, then only toggle segment classes
+  const svg = document.getElementById('main');
+  const root = el('g', { transform: 'skewX(-6)' }, svg);
+  const digits = [];
+  let x = 0;
+  for (const ch of '88:88:88') {
+    if (ch === ':') {
+      const cx = x + COLON_W / 2;
+      el('circle', { class: 'seg on', cx, cy: 30, r: 6.5 }, root);
+      el('circle', { class: 'seg on', cx, cy: 70, r: 6.5 }, root);
+      x += COLON_W + GAP;
+    } else {
+      const g = el('g', { transform: `translate(${x},0)` }, root);
+      const segs = {};
+      for (const s in SEGPTS) segs[s] = el('polygon', { class: 'seg', points: SEGPTS[s] }, g);
+      digits.push(segs);
+      x += DW + GAP;
+    }
+  }
+  // skewX(-6deg) pulls the bottom edge left by ~10.5 units
+  svg.setAttribute('viewBox', `-14 -3 ${x - GAP + 18} ${DH + 6}`);
+
+  let last = '';
+  function render(str) {
+    if (str === last) return;
+    last = str;
+    const ds = str.replace(/:/g, '');
+    digits.forEach((segs, i) => {
+      const on = SEGMAP[ds[i]];
+      for (const s in segs) segs[s].classList.toggle('on', on.includes(s));
+    });
+  }
+
+  // ---------- Settings ----------
+  const STORE = 'time830.clock.v1';
+  const S = { h12: false, ghost: true, transparent: false, wake: true, color: 'red' };
+  try { Object.assign(S, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) {} };
+
+  // URL overrides, e.g. for an OBS browser source: ?color=red&bg=transparent&ui=0&format=12
+  const q = new URLSearchParams(location.search);
+  if (q.has('color')) S.color = q.get('color');
+  if (q.get('bg') === 'transparent') S.transparent = true;
+  if (q.get('ghost') === '0') S.ghost = false;
+  if (q.get('format') === '12') S.h12 = true;
+  if (q.get('format') === '24') S.h12 = false;
+  let noUi = q.get('ui') === '0';
+
+  // ---------- Clock ----------
+  // The system clock (Date.now) is the most accurate source a browser has: the OS keeps it
+  // NTP-synced to atomic time. We read it every display frame and redraw the moment the second
+  // rolls over, so the shown time is never more than one frame (~16 ms) behind.
+  const pad = n => String(n).padStart(2, '0');
+  const body = document.body;
+  const ampm = document.getElementById('ampm');
+
+  function tick() {
+    const d = new Date();
+    let h = d.getHours();
+    const pm = h >= 12;
+    if (S.h12) h = h % 12 || 12;
+    const str = `${pad(h)}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    render(str);
+    ampm.hidden = !S.h12;
+    if (S.h12) ampm.querySelectorAll('span').forEach(s => s.classList.toggle('on', (s.dataset.p === 'PM') === pm));
+    if (document.title !== str) document.title = str;
+  }
+
+  function loop() { tick(); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+  // rAF pauses in background tabs; keep the tab title current anyway
+  setInterval(() => { if (document.hidden) tick(); }, 250);
+
+  // ---------- Wake lock: keep the screen on while the clock is visible ----------
+  let wakeLock = null;
+  async function requestWake() {
+    if (!S.wake || !('wakeLock' in navigator) || wakeLock || document.hidden) return;
+    try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } catch (e) {}
+  }
+  function releaseWake() { if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; } }
+  document.addEventListener('visibilitychange', requestWake);
+  requestWake();
+
+  // ---------- UI ----------
+  const $ = id => document.getElementById(id);
+  const COLORS = {
+    red: ['#ff2a1a', 'rgba(255,42,26,.55)'],
+    amber: ['#ffae00', 'rgba(255,174,0,.5)'],
+    green: ['#2bff4f', 'rgba(43,255,79,.45)'],
+    blue: ['#2aa9ff', 'rgba(42,169,255,.5)'],
+    white: ['#f2f2f2', 'rgba(255,255,255,.35)'],
+  };
+
+  const colorsEl = $('colors');
+  for (const name in COLORS) {
+    const b = document.createElement('button');
+    b.className = 'swatch'; b.dataset.color = name; b.title = name; b.setAttribute('aria-label', name);
+    b.style.background = COLORS[name][0];
+    b.onclick = () => { S.color = name; save(); syncUi(); };
+    colorsEl.appendChild(b);
+  }
+
+  function syncUi() {
+    const c = COLORS[S.color] || COLORS.red;
+    document.documentElement.style.setProperty('--on', c[0]);
+    document.documentElement.style.setProperty('--glow', c[1]);
+    colorsEl.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', b.dataset.color === S.color));
+    body.classList.toggle('noghost', !S.ghost);
+    body.classList.toggle('transparent', S.transparent);
+    body.classList.toggle('noui', noUi);
+    document.querySelectorAll('[data-fmt]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.fmt === '12') === S.h12));
+    $('optGhost').checked = S.ghost; $('optTransparent').checked = S.transparent; $('optWake').checked = S.wake;
+    last = ''; tick();
+  }
+
+  const flip = key => { S[key] = !S[key]; save(); syncUi(); };
+  const panel = $('panel');
+  document.querySelectorAll('[data-fmt]').forEach(b => b.onclick = () => { S.h12 = b.dataset.fmt === '12'; save(); syncUi(); });
+  [['optGhost', 'ghost'], ['optTransparent', 'transparent'], ['optWake', 'wake']].forEach(([id, key]) => {
+    $(id).addEventListener('change', e => {
+      S[key] = e.target.checked; save(); syncUi();
+      if (key === 'wake') S.wake ? requestWake() : releaseWake();
+    });
+  });
+  $('settingsBtn').onclick = () => { panel.hidden = !panel.hidden; };
+
+  $('obsBtn').onclick = () => {
+    const p = new URLSearchParams({ color: S.color, bg: 'transparent', ui: '0', format: S.h12 ? '12' : '24' });
+    if (!S.ghost) p.set('ghost', '0');
+    const url = location.origin + location.pathname + '?' + p;
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+      .then(() => toast('OBS link copied'))
+      .catch(() => window.prompt('Copy this:', url));
+  };
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+  }
+
+  // ---------- Fullscreen ----------
+  function toggleFs() {
+    const d = document, de = d.documentElement;
+    if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    else (de.requestFullscreen || de.webkitRequestFullscreen).call(de);
+  }
+  $('fsBtn').onclick = toggleFs;
+  $('stage').addEventListener('dblclick', toggleFs);
+
+  // ---------- Idle hide ----------
+  let idleTimer;
+  function wake() {
+    body.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { if (panel.hidden) body.classList.add('idle'); }, 2500);
+  }
+  ['mousemove', 'mousedown', 'touchstart', 'keydown'].forEach(ev => document.addEventListener(ev, wake, { passive: true }));
+  wake();
+
+  // ---------- Keyboard ----------
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key.toLowerCase()) {
+      case 'f': toggleFs(); break;
+      case 't': flip('h12'); break;
+      case 's': panel.hidden = !panel.hidden; break;
+      case 'escape': panel.hidden = true; break;
+      case 'h': noUi = !noUi; syncUi(); if (noUi) toast('Controls hidden. Press H to show'); break;
+    }
+  });
+
+  syncUi();
+})();
+</script>
+</body>
+</html>
